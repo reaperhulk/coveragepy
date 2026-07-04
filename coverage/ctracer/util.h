@@ -28,9 +28,7 @@
    tracer, so that cost can be measured by comparing against a normal build.
    Never define these in a real build.
 
-   ABLATE_RECORD       Don't create line-number ints or add them to file_data.
-   ABLATE_SET_ADD      Create the line-number ints, but skip PySet_Add.
-   ABLATE_LOCK         Skip the lock_data/unlock_data calls in handle_call.
+   ABLATE_RECORD       Don't record line numbers/arcs into the trace buffer.
    ABLATE_TRACE_CACHE  Memoize the last should_trace_cache lookup, skipping
                        the dict lookup for repeated calls in the same file.
 */

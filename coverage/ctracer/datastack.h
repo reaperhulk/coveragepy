@@ -6,14 +6,18 @@
 
 #include "util.h"
 #include "stats.h"
+#include "buffer.h"
 
 /* An entry on the data stack.  For each call frame, we need to record all
  * the information needed for CTracer_handle_line to operate as quickly as
  * possible.
  */
 typedef struct DataStackEntry {
-    /* The current file_data set. Owned. */
-    PyObject * file_data;
+    /* Where this frame's data is recorded, or NULL if the frame isn't being
+     * traced.  Borrowed from the tracer's TraceBuffer, which outlives the
+     * stack and never moves its tables.
+     */
+    FileTable * file_table;
 
     /* The disposition object for this frame. A borrowed instance of CFileDisposition. */
     PyObject * disposition;

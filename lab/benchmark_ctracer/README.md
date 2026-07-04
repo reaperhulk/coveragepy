@@ -65,15 +65,21 @@ when two numbers disagree.
 | ------------ | -------------------------------------------------------------- |
 | `baseline`   | no tracing at all                                              |
 | `do_nothing` | trace callback returns immediately: interpreter dispatch cost  |
-| `no_record`  | no line-number ints created, no `PySet_Add`                    |
-| `no_set_add` | ints created but not added to the set                          |
-| `no_lock`    | no `lock_data`/`unlock_data` Python calls on call events       |
+| `no_record`  | no values recorded into the trace buffer                       |
 | `memo_cache` | `should_trace_cache` dict lookup memoized on call events       |
 | `normal`     | the real tracer                                                |
 | `pytracer`   | pure-Python `PyTracer`, for scale                              |
 | `stats`      | `COLLECT_STATS` build, used to count events (not timed)        |
 
-## Results (2026-07, Python 3.11.15, x86-64 Linux, gcc -O2)
+(Two earlier variants, `no_set_add` and `no_lock`, ablated the Python set
+adds and the `lock_data`/`unlock_data` calls.  They were used for the
+investigation below and were retired when the per-tracer trace buffers
+removed both operations from the tracer entirely.)
+
+## Investigation results (2026-07, Python 3.11.15, x86-64 Linux, gcc -O2)
+
+These are the *pre-optimization* numbers that motivated the per-tracer
+trace buffers; the "after" numbers follow in the next section.
 
 Went in with the hypothesis that "the dict/set from Python will be the slow
 point."  Verdict: **confirmed for line events, which dominate most programs —
@@ -110,18 +116,55 @@ Representative per-event costs (min of 5 runs, n=100k iterations):
 Ranked by measured payoff:
 
 1. **Stop paying `PyLong` + `PySet_Add` per line event.**  Almost every line
-   event re-records an already-seen line/arc (loops!).  Options: a C-side
-   structure per `DataStackEntry` (bitset or open-addressed table of packed
-   ints, converted to Python sets at flush time), or even just a small
-   per-entry cache of recently recorded packed values to skip duplicates
-   before touching Python objects.
+   event re-records an already-seen line/arc (loops!).
 2. **Get the Python `lock_data`/`unlock_data` callables off the per-call
-   path** — e.g. take a C lock directly, or only lock when a second tracer
-   thread actually exists.
+   path.**
 3. Not worth it: memoizing `should_trace_cache` (≤10 ns, within noise on
    several workloads).
 
-### Sample output
+Items 1 and 2 became the per-tracer trace buffers, measured next.
+
+## After: per-tracer C trace buffers (same machine, same suite)
+
+CTracer now records into per-tracer C hash tables of packed uint64 values
+(`coverage/ctracer/buffer.c`), drained into the Python `data` dict only when
+the collector flushes.  The hot path touches no Python objects and calls no
+Python callables; recording and draining are serialized by the GIL (the
+buffer operations are single uninterruptible C sequences), or by a per-tracer
+`PyMutex` on free-threaded builds.
+
+Correctness was checked three ways: the harness selftest (exact match with a
+`sys.settrace` reference, plus a two-thread merge test with concurrent
+drains), and end-to-end `coverage run`/`coverage json` diffs — the new tracer
+produces byte-identical output to both the old tracer and where expected
+PyTracer, in lines and branch mode, with threads and dynamic contexts.
+
+Tracing overhead (normal minus baseline, min of 5 runs):
+
+| workload/mode   | before  | after   | change |
+| --------------- | ------- | ------- | ------ |
+| lines_hi lines  | 41.9ms  | 26.9ms  | -36%   |
+| lines_hi arcs   | 46.9ms  | 27.2ms  | -42%   |
+| calls lines     | 102.0ms | 66.5ms  | -35%   |
+| calls arcs      | 128.3ms | 74.4ms  | -42%   |
+| branchy arcs    | 32.3ms  | 19.2ms  | -41%   |
+| generators arcs | 41.3ms  | 23.2ms  | -44%   |
+| recursion arcs  | 30.0ms  | 17.6ms  | -41%   |
+
+Per-event, the whole tracer body dropped from ~24-30ns to ~7-9ns on
+line-heavy workloads (recording itself: ~20-25ns → ~2-6ns), and call events
+lost the entire ~60ns lock-callable cost.  Callgrind confirms the hot path is
+now pure C: inside `CTracer_trace` the only remaining non-trivial callees are
+`FileTable_record`, `PyDict_GetItem` (should_trace_cache), and the frame
+accessors; `PySet_Add`, `PyLong_*`, `_Py_Dealloc`, `PyObject_RichCompare`,
+and the `lock_data` call machinery no longer appear at all.  `CTracer_trace`'s
+share of all instructions fell from 20-37% to 7-16%.
+
+What's left is mostly the floor: the interpreter's trace dispatch is
+~23-31ns/event, now 70-80% of total overhead.  Getting below that means a
+`sys.monitoring` core, not a faster `sys.settrace` tracer.
+
+### Sample output (pre-optimization, for the record)
 
 ```
 == workload 'lines_hi', tracing arcs == (events: 1 calls, 900,016 lines, 1 returns)

@@ -73,6 +73,8 @@ CTracer_init(CTracer *self, PyObject *args_unused, PyObject *kwds_unused)
         goto error;
     }
 
+    TraceBuffer_init(&self->buffer);
+
     self->pdata_stack = &self->data_stack;
 
     self->context = Py_None;
@@ -110,6 +112,8 @@ CTracer_dealloc(CTracer *self)
     Py_XDECREF(self->unlock_data);
     Py_XDECREF(self->context);
     Py_XDECREF(self->disable_plugin);
+
+    TraceBuffer_dealloc(&self->buffer);
 
     DataStack_dealloc(&self->stats, &self->data_stack);
     if (self->data_stacks) {
@@ -178,12 +182,10 @@ CTracer_showlog(CTracer * self, int lineno, PyObject * filename, const char * ms
 static const char * what_sym[] = {"CALL", "EXC ", "LINE", "RET "};
 #endif
 
-/* Record a pair of integers in self->pcur_entry->file_data. */
+/* Record a pair of integers in self->pcur_entry->file_table. */
 static int
 CTracer_record_pair(CTracer *self, int l1, int l2)
 {
-    int ret = RET_ERROR;
-    PyObject * packed_obj = NULL;
     uint64 packed = 0;
 
     // Conceptually, data is a set of tuples (l1, l2), but that literally
@@ -202,25 +204,18 @@ CTracer_record_pair(CTracer *self, int l1, int l2)
         l2 = -l2;
     }
     packed |= (((uint64)l2) << 28) + (uint64)l1;
+
 #if !ABLATE_RECORD
-    packed_obj = PyLong_FromUnsignedLongLong(packed);
-    if (packed_obj == NULL) {
-        goto error;
-    }
-
-#if !ABLATE_SET_ADD
-    if (PySet_Add(self->pcur_entry->file_data, packed_obj) < 0) {
-        goto error;
+    int status;
+    BUFFER_LOCK(self);
+    status = FileTable_record(self->pcur_entry->file_table, packed);
+    BUFFER_UNLOCK(self);
+    if (status < 0) {
+        return RET_ERROR;
     }
 #endif
-#endif
 
-    ret = RET_OK;
-
-error:
-    Py_XDECREF(packed_obj);
-
-    return ret;
+    return RET_OK;
 }
 
 /* Set self->pdata_stack to the proper data_stack to use. */
@@ -323,7 +318,6 @@ static int
 CTracer_handle_call(CTracer *self, PyFrameObject *frame)
 {
     int ret = RET_ERROR;
-    int ret2;
 
     /* Owned references that we clean up at the very end of the function. */
     PyObject * disposition = NULL;
@@ -512,71 +506,28 @@ got_disposition:
     }
 
     if (tracename != Py_None) {
-        PyObject * file_data;
-        BOOL had_error = FALSE;
-        PyObject * res;
-
-#if !ABLATE_LOCK
-        res = PyObject_CallFunctionObjArgs(self->lock_data, NULL);
-        if (res == NULL) {
-            goto error;
-        }
-#endif
-
-        file_data = PyDict_GetItem(self->data, tracename);
-
-        if (file_data == NULL) {
-            if (PyErr_Occurred()) {
-                had_error = TRUE;
-                goto unlock;
-            }
-            file_data = PySet_New(NULL);
-            if (file_data == NULL) {
-                had_error = TRUE;
-                goto unlock;
-            }
-            ret2 = PyDict_SetItem(self->data, tracename, file_data);
-            if (ret2 < 0) {
-                had_error = TRUE;
-                goto unlock;
-            }
-
-            /* If the disposition mentions a plugin, record that. */
-            if (file_tracer != Py_None) {
-                ret2 = PyDict_SetItem(self->file_tracers, tracename, plugin_name);
-                if (ret2 < 0) {
-                    had_error = TRUE;
-                    goto unlock;
-                }
-            }
-        }
-        else {
-            /* PyDict_GetItem gives a borrowed reference. Own it. */
-            Py_INCREF(file_data);
-        }
-
-        unlock:
-
-#if !ABLATE_LOCK
-        res = PyObject_CallFunctionObjArgs(self->unlock_data, NULL);
-        if (res == NULL) {
-            goto error;
-        }
-#endif
-
-        if (had_error) {
+        /* Find or create this file's table in our own buffer.  The plugin
+         * name (if any) rides along so flush_data can fill in file_tracers.
+         * No lock_data/unlock_data: nothing shared is touched here.
+         */
+        FileTable * file_table;
+        BUFFER_LOCK(self);
+        file_table = TraceBuffer_get_file_table(
+            &self->buffer, tracename,
+            (file_tracer != Py_None) ? plugin_name : NULL
+        );
+        BUFFER_UNLOCK(self);
+        if (file_table == NULL) {
             goto error;
         }
 
-        Py_XDECREF(self->pcur_entry->file_data);
-        self->pcur_entry->file_data = file_data;
+        self->pcur_entry->file_table = file_table;
         self->pcur_entry->file_tracer = file_tracer;
 
         SHOWLOG(PyFrame_GetLineNumber(frame), filename, "traced");
     }
     else {
-        Py_XDECREF(self->pcur_entry->file_data);
-        self->pcur_entry->file_data = NULL;
+        self->pcur_entry->file_table = NULL;
         self->pcur_entry->file_tracer = Py_None;
         SHOWLOG(PyFrame_GetLineNumber(frame), filename, "skipped");
     }
@@ -693,7 +644,7 @@ CTracer_handle_line(CTracer *self, PyFrameObject *frame)
     STATS( self->stats.lines++; )
     if (self->pdata_stack->depth >= 0) {
         SHOWLOG(PyFrame_GetLineNumber(frame), MyFrame_BorrowCode(frame)->co_filename, "line");
-        if (self->pcur_entry->file_data) {
+        if (self->pcur_entry->file_table) {
             int lineno_from = -1;
             int lineno_to = -1;
 
@@ -726,20 +677,19 @@ CTracer_handle_line(CTracer *self, PyFrameObject *frame)
                         }
                     }
                     else {
-                        /* Tracing lines: key is simply this_line. */
+                        /* Tracing lines: key is simply this_line.  Store it
+                         * sign-extended so unusual negative line numbers from
+                         * plugins round-trip through the uint64 table.
+                         */
 #if !ABLATE_RECORD
-                        PyObject * this_line = PyLong_FromLong((long)lineno_from);
-                        if (this_line == NULL) {
-                            goto error;
-                        }
-
-#if !ABLATE_SET_ADD
-                        ret2 = PySet_Add(self->pcur_entry->file_data, this_line);
-#else
-                        ret2 = 0;
-#endif
-                        Py_DECREF(this_line);
-                        if (ret2 < 0) {
+                        int status;
+                        BUFFER_LOCK(self);
+                        status = FileTable_record(
+                            self->pcur_entry->file_table,
+                            (uint64)(long long)lineno_from
+                        );
+                        BUFFER_UNLOCK(self);
+                        if (status < 0) {
                             goto error;
                         }
 #endif
@@ -774,7 +724,7 @@ CTracer_handle_return(CTracer *self, PyFrameObject *frame)
 
     if (self->pdata_stack->depth >= 0) {
         self->pcur_entry = &self->pdata_stack->stack[self->pdata_stack->depth];
-        if (self->tracing_arcs && self->pcur_entry->file_data) {
+        if (self->tracing_arcs && self->pcur_entry->file_table) {
             BOOL real_return = FALSE;
             pCode = MyCode_GetCode(MyFrame_BorrowCode(frame));
             int lasti = MyFrame_GetLasti(frame);
@@ -1016,6 +966,96 @@ done:
     return ret;
 }
 
+/* Drain this tracer's buffer into the shared Python data structures.
+ *
+ * Phase 1 "steals" the filled tables: a pure-C snapshot-and-reset that is
+ * atomic under the GIL and holds the buffer mutex on free-threaded builds.
+ * Phase 2 converts the stolen values into ints in the sets of `self->data`
+ * at leisure: by then the memory is private, so concurrent recording (which
+ * refills the reset tables) can no longer interfere, even if creating the
+ * Python objects triggers a GC or a thread switch.
+ */
+static PyObject *
+CTracer_flush_data(CTracer *self, PyObject *args_unused)
+{
+    StolenTable * stolen = NULL;
+    size_t count = 0;
+    size_t i;
+    int status;
+    PyObject * result = NULL;
+
+    if (self->data == NULL || !PyDict_Check(self->data)) {
+        /* Not wired up to a collector: nothing to flush into. */
+        Py_RETURN_NONE;
+    }
+
+    BUFFER_LOCK(self);
+    status = TraceBuffer_steal(&self->buffer, &stolen, &count);
+    BUFFER_UNLOCK(self);
+    if (status < 0) {
+        return NULL;
+    }
+
+    for (i = 0; i < count; i++) {
+        StolenTable * st = &stolen[i];
+        PyObject * file_data;
+        PyObject * empty = PySet_New(NULL);
+        if (empty == NULL) {
+            goto done;
+        }
+        file_data = PyDict_SetDefault(self->data, st->filename, empty);
+        Py_XINCREF(file_data);
+        Py_DECREF(empty);
+        if (file_data == NULL) {
+            goto done;
+        }
+
+        status = 0;
+        for (size_t j = 0; status == 0 && j <= st->mask && st->slots != NULL; j++) {
+            uint64 value = st->slots[j];
+            if (value != 0) {
+                PyObject * obj = PyLong_FromLongLong((long long)value);
+                if (obj == NULL) {
+                    status = -1;
+                    break;
+                }
+                status = PySet_Add(file_data, obj);
+                Py_DECREF(obj);
+            }
+        }
+        if (status == 0 && st->has_zero) {
+            PyObject * obj = PyLong_FromLong(0);
+            if (obj == NULL) {
+                status = -1;
+            }
+            else {
+                status = PySet_Add(file_data, obj);
+                Py_DECREF(obj);
+            }
+        }
+        Py_DECREF(file_data);
+        if (status < 0) {
+            goto done;
+        }
+
+        if (st->plugin_name != NULL && self->file_tracers != NULL && PyDict_Check(self->file_tracers)) {
+            if (PyDict_SetItem(self->file_tracers, st->filename, st->plugin_name) < 0) {
+                goto done;
+            }
+        }
+    }
+
+    result = Py_None;
+    Py_INCREF(result);
+
+done:
+    for (i = 0; i < count; i++) {
+        PyMem_Free(stolen[i].slots);
+    }
+    PyMem_Free(stolen);
+    return result;
+}
+
 static PyObject *
 CTracer_start(CTracer *self, PyObject *args_unused)
 {
@@ -1132,6 +1172,9 @@ CTracer_methods[] = {
 
     { "stop",       (PyCFunction) CTracer_stop,         METH_VARARGS,
             PyDoc_STR("Stop the tracer") },
+
+    { "flush_data", (PyCFunction) CTracer_flush_data,   METH_NOARGS,
+            PyDoc_STR("Drain buffered trace data into the data dict") },
 
     { "get_stats",  (PyCFunction) CTracer_get_stats,    METH_VARARGS,
             PyDoc_STR("Get statistics about the tracing") },

@@ -450,6 +450,15 @@ class Collector:
         if not self._activity():
             return False
 
+        # CTracer buffers its data in per-tracer C structures; drain them
+        # into self.data first.  Draining "steals" the buffers atomically
+        # with respect to the recording threads, then converts the stolen
+        # values, so tracers in other threads can keep running.
+        for tracer in self.tracers:
+            tracer_flush = getattr(tracer, "flush_data", None)
+            if tracer_flush is not None:
+                tracer_flush()
+
         # dict.copy() and set.copy() are atomic in CPython (the GIL is
         # held for the duration of the C-level copy), so we get clean
         # snapshots of the dict and each per-file set even while tracers

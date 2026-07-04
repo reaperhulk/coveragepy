@@ -18,11 +18,9 @@ DataStack_init(Stats *pstats, DataStack *pdata_stack)
 void
 DataStack_dealloc(Stats *pstats, DataStack *pdata_stack)
 {
-    int i;
-
-    for (i = 0; i < pdata_stack->alloc; i++) {
-        Py_XDECREF(pdata_stack->stack[i].file_data);
-    }
+    /* Entries hold no references: file_table is borrowed from the tracer's
+     * TraceBuffer, and disposition/file_tracer are borrowed too.
+     */
     PyMem_Free(pdata_stack->stack);
 }
 

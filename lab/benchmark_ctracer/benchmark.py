@@ -53,8 +53,8 @@ REPO = HERE.parent.parent
 CTRACER_DIR = REPO / "coverage" / "ctracer"
 BUILD_DIR = HERE / "build"
 
-SOURCES = ["datastack.c", "filedisp.c", "module.c", "tracer.c"]
-HEADERS = ["datastack.h", "filedisp.h", "stats.h", "tracer.h", "util.h"]
+SOURCES = ["buffer.c", "datastack.c", "filedisp.c", "module.c", "tracer.c"]
+HEADERS = ["buffer.h", "datastack.h", "filedisp.h", "stats.h", "tracer.h", "util.h"]
 BASE_CFLAGS = ["-O2", "-g", "-fno-omit-frame-pointer", "-fPIC", "-shared"]
 
 # Buildable variants of the tracer.  "stats" is used to count events, the
@@ -65,8 +65,6 @@ VARIANTS = {
     "stats": ["-DCOLLECT_STATS"],
     "do_nothing": ["-DDO_NOTHING"],
     "no_record": ["-DABLATE_RECORD"],
-    "no_set_add": ["-DABLATE_SET_ADD"],
-    "no_lock": ["-DABLATE_LOCK"],
     "memo_cache": ["-DABLATE_TRACE_CACHE"],
 }
 
@@ -75,16 +73,13 @@ VARIANT_NOTES = {
     "baseline": "no tracing at all",
     "pytracer": "pure-Python tracer, for scale",
     "do_nothing": "trace fn returns immediately: interpreter dispatch cost",
-    "no_record": "no line-number ints created, no set adds",
-    "no_set_add": "line-number ints created, but not added to the set",
-    "no_lock": "no lock_data/unlock_data Python calls on call events",
+    "no_record": "no values recorded into the trace buffer",
     "memo_cache": "should_trace_cache dict lookup memoized on call events",
     "normal": "the real tracer",
 }
 
 DEFAULT_VARIANTS = [
-    "baseline", "do_nothing", "no_record", "no_set_add",
-    "no_lock", "memo_cache", "normal",
+    "baseline", "do_nothing", "no_record", "memo_cache", "normal",
 ]
 DEFAULT_WORKLOADS = ["lines", "lines_hi", "calls", "branchy", "generators", "recursion"]
 DEFAULT_MODES = ["lines", "arcs"]
@@ -262,6 +257,9 @@ def cmd_worker(args) -> None:
     if tracer is not None:
         stats = tracer.get_stats()
         tracer.stop()
+        flush = getattr(tracer, "flush_data", None)
+        if flush is not None:
+            flush()
 
     result = {
         "variant": args.variant,
@@ -380,23 +378,8 @@ def cmd_run(args) -> None:
                 deltas = []
                 if mintime("no_record") is not None and line_evts:
                     deltas.append((
-                        "int creation + set add (per line event)",
+                        "recording into the buffer (per line event)",
                         (t_normal - mintime("no_record")) / line_evts,
-                    ))
-                if mintime("no_set_add") is not None and line_evts:
-                    deltas.append((
-                        "set add alone (per line event)",
-                        (t_normal - mintime("no_set_add")) / line_evts,
-                    ))
-                    if mintime("no_record") is not None:
-                        deltas.append((
-                            "int creation alone (per line event)",
-                            (mintime("no_set_add") - mintime("no_record")) / line_evts,
-                        ))
-                if mintime("no_lock") is not None and call_evts:
-                    deltas.append((
-                        "lock/unlock Python calls (per call event)",
-                        (t_normal - mintime("no_lock")) / call_evts,
                     ))
                 if mintime("memo_cache") is not None and call_evts:
                     deltas.append((
@@ -551,12 +534,18 @@ def cmd_selftest(args) -> None:
     want = expected_lines(fn, n, traced_file)
     assert want, "sys.settrace found no lines?"
 
+    def drain(tracer):
+        flush = getattr(tracer, "flush_data", None)
+        if flush is not None:
+            flush()
+
     def run(variant, arcs):
         mod = load_variant(variant)
         tracer, data = make_tracer(mod.CTracer, mod.CFileDisposition, arcs, traced_file)
         tracer.start()
         fn(n)
         tracer.stop()
+        drain(tracer)
         return data
 
     # Lines mode must agree exactly with sys.settrace.
@@ -574,11 +563,41 @@ def cmd_selftest(args) -> None:
     )
 
     # Ablated builds behave as advertised.
-    assert run("no_record", arcs=False)[traced_file] == set()
-    assert run("no_set_add", arcs=False)[traced_file] == set()
-    assert run("no_lock", arcs=False)[traced_file] == want
+    assert run("no_record", arcs=False).get(traced_file, set()) == set()
     assert run("memo_cache", arcs=False)[traced_file] == want
     assert traced_file not in run("do_nothing", arcs=False)
+
+    # Two tracers in two threads, sharing one data dict: buffers must merge,
+    # and draining from the main thread while both are recording must be
+    # safe and lose nothing.
+    import threading
+
+    mod = load_variant("normal")
+    tracer1, data = make_tracer(mod.CTracer, mod.CFileDisposition, False, traced_file)
+    tracer2, _ = make_tracer(mod.CTracer, mod.CFileDisposition, False, traced_file)
+    tracer2.data = data
+
+    def thread_main(tracer):
+        tracer.start()
+        for _ in range(50):
+            fn(n)
+        tracer.stop()
+
+    threads = [
+        threading.Thread(target=thread_main, args=(tracer1,)),
+        threading.Thread(target=thread_main, args=(tracer2,)),
+    ]
+    for t in threads:
+        t.start()
+    for _ in range(20):
+        drain(tracer1)
+        drain(tracer2)
+    for t in threads:
+        t.join()
+    drain(tracer1)
+    drain(tracer2)
+    got = data[traced_file]
+    assert got == want, f"threaded mismatch: extra={got - want} missing={want - got}"
 
     # And the stats build counts events.
     mod = load_variant("stats")

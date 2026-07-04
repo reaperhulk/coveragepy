@@ -9,7 +9,22 @@
 #include "frameobject.h"
 #include "opcode.h"
 
+#include "buffer.h"
 #include "datastack.h"
+
+/* On free-threaded builds there is no GIL to make the pure-C trace-buffer
+ * operations atomic, so recording (in the traced thread) and draining (any
+ * thread calling flush_data) are serialized with a per-tracer mutex.  It is
+ * held only across pure-C buffer operations, never across anything that can
+ * run Python code, so it cannot deadlock.  With a GIL these are no-ops.
+ */
+#ifdef Py_GIL_DISABLED
+#define BUFFER_LOCK(self)       PyMutex_Lock(&(self)->buffer_mutex)
+#define BUFFER_UNLOCK(self)     PyMutex_Unlock(&(self)->buffer_mutex)
+#else
+#define BUFFER_LOCK(self)
+#define BUFFER_UNLOCK(self)
+#endif
 
 /* The CTracer type. */
 
@@ -40,15 +55,19 @@ typedef struct CTracer {
     /* The current dynamic context. */
     PyObject * context;
 
-    /*
-        The data stack is a stack of sets.  Each set collects
-        data for a single source file.  The data stack parallels the call stack:
-        each call pushes the new frame's file data onto the data stack, and each
-        return pops file data off.
+    /* Where trace data is recorded: per-file hash sets of uint64 values,
+        owned by this tracer alone.  If tracing arcs, the values are packed
+        line-number pairs; if not, they are line numbers.  The buffer is
+        drained into the shared Python `data` dict by flush_data().
+    */
+    TraceBuffer buffer;
+#ifdef Py_GIL_DISABLED
+    PyMutex buffer_mutex;           /* Serializes buffer access; see above. */
+#endif
 
-        The file data is a set whose form depends on the tracing options.
-        If tracing arcs, the values are line number pairs.  If not tracing arcs,
-        the values are line numbers.
+    /*
+        The data stack parallels the call stack: each call pushes the new
+        frame's buffer table onto the data stack, and each return pops it off.
     */
 
     DataStack data_stack;           /* Used if we aren't doing concurrency. */
