@@ -1,7 +1,7 @@
 #!/bin/bash
 S=/tmp/claude-0/-home-user-coveragepy/629652d7-bb14-5436-9d03-584022642139/scratchpad
 cd $S/cryptography
-DATA=$S/rel-1.coverage
+DATA=${1:-$S/rel-1.coverage}
 for iter in 1 2 3 4 5; do
   for ver in rel branch; do
     BIN=$S/venv-$ver/bin/coverage
