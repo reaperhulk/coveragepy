@@ -14,11 +14,26 @@
 #include <stdatomic.h>
 #endif
 
-/* Compile-time debugging helpers */
-#undef WHAT_LOG         /* Define to log the WHAT params in the trace function. */
-#undef TRACE_LOG        /* Define to log our bookkeeping. */
-#undef COLLECT_STATS    /* Collect counters: stats are printed when tracer is stopped. */
-#undef DO_NOTHING       /* Define this to make the tracer do nothing. */
+/* Compile-time debugging helpers.  These all default to off.  Turn them on
+   either by defining them here, or with -D compiler flags (which is what the
+   benchmark harness in lab/benchmark_ctracer does).
+
+   WHAT_LOG         Define to log the WHAT params in the trace function.
+   TRACE_LOG        Define to log our bookkeeping.
+   COLLECT_STATS    Collect counters: stats are printed when tracer is stopped.
+   DO_NOTHING       Define this to make the tracer do nothing.
+
+   Benchmark-only ablation flags (see lab/benchmark_ctracer/README.md).  Each
+   one deliberately breaks correctness to isolate the cost of one piece of the
+   tracer, so that cost can be measured by comparing against a normal build.
+   Never define these in a real build.
+
+   ABLATE_RECORD       Don't create line-number ints or add them to file_data.
+   ABLATE_SET_ADD      Create the line-number ints, but skip PySet_Add.
+   ABLATE_LOCK         Skip the lock_data/unlock_data calls in handle_call.
+   ABLATE_TRACE_CACHE  Memoize the last should_trace_cache lookup, skipping
+                       the dict lookup for repeated calls in the same file.
+*/
 
 #if PY_VERSION_HEX >= 0x030B00A0
 // 3.11 moved f_lasti into an internal structure. This is totally the wrong way

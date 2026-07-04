@@ -54,6 +54,16 @@ error:
 
 static void CTracer_disable_plugin(CTracer *self, PyObject * disposition);
 
+#if ABLATE_TRACE_CACHE
+/* Benchmark ablation: a one-entry memo of the last should_trace_cache lookup,
+ * keyed by pointer identity of the filename.  These are borrowed references
+ * kept alive by should_trace_cache, which is why this is only safe for
+ * benchmarking: a real run could mutate or discard the cache dict.
+ */
+static PyObject * ablate_last_filename = NULL;
+static PyObject * ablate_last_disposition = NULL;
+#endif
+
 static int
 CTracer_init(CTracer *self, PyObject *args_unused, PyObject *kwds_unused)
 {
@@ -192,14 +202,18 @@ CTracer_record_pair(CTracer *self, int l1, int l2)
         l2 = -l2;
     }
     packed |= (((uint64)l2) << 28) + (uint64)l1;
+#if !ABLATE_RECORD
     packed_obj = PyLong_FromUnsignedLongLong(packed);
     if (packed_obj == NULL) {
         goto error;
     }
 
+#if !ABLATE_SET_ADD
     if (PySet_Add(self->pcur_entry->file_data, packed_obj) < 0) {
         goto error;
     }
+#endif
+#endif
 
     ret = RET_OK;
 
@@ -373,6 +387,13 @@ CTracer_handle_call(CTracer *self, PyFrameObject *frame)
 
     /* Check if we should trace this line. */
     filename = MyFrame_BorrowCode(frame)->co_filename;
+#if ABLATE_TRACE_CACHE
+    if (filename == ablate_last_filename && ablate_last_disposition != NULL) {
+        disposition = ablate_last_disposition;
+        Py_INCREF(disposition);
+        goto got_disposition;
+    }
+#endif
     disposition = PyDict_GetItem(self->should_trace_cache, filename);
     if (disposition == NULL) {
         if (PyErr_Occurred()) {
@@ -395,6 +416,12 @@ CTracer_handle_call(CTracer *self, PyFrameObject *frame)
     else {
         Py_INCREF(disposition);
     }
+
+#if ABLATE_TRACE_CACHE
+    ablate_last_filename = filename;
+    ablate_last_disposition = disposition;
+got_disposition:
+#endif
 
     if (disposition == Py_None) {
         /* A later check_include returned false, so don't trace it. */
@@ -489,10 +516,12 @@ CTracer_handle_call(CTracer *self, PyFrameObject *frame)
         BOOL had_error = FALSE;
         PyObject * res;
 
+#if !ABLATE_LOCK
         res = PyObject_CallFunctionObjArgs(self->lock_data, NULL);
         if (res == NULL) {
             goto error;
         }
+#endif
 
         file_data = PyDict_GetItem(self->data, tracename);
 
@@ -528,10 +557,12 @@ CTracer_handle_call(CTracer *self, PyFrameObject *frame)
 
         unlock:
 
+#if !ABLATE_LOCK
         res = PyObject_CallFunctionObjArgs(self->unlock_data, NULL);
         if (res == NULL) {
             goto error;
         }
+#endif
 
         if (had_error) {
             goto error;
@@ -696,16 +727,22 @@ CTracer_handle_line(CTracer *self, PyFrameObject *frame)
                     }
                     else {
                         /* Tracing lines: key is simply this_line. */
+#if !ABLATE_RECORD
                         PyObject * this_line = PyLong_FromLong((long)lineno_from);
                         if (this_line == NULL) {
                             goto error;
                         }
 
+#if !ABLATE_SET_ADD
                         ret2 = PySet_Add(self->pcur_entry->file_data, this_line);
+#else
+                        ret2 = 0;
+#endif
                         Py_DECREF(this_line);
                         if (ret2 < 0) {
                             goto error;
                         }
+#endif
                     }
 
                     self->pcur_entry->last_line = lineno_from;
