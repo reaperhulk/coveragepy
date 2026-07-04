@@ -235,6 +235,7 @@ class CoverageConfig(TConfigurable, TPluginConfig):
         self.skip_covered = False
         self.skip_empty = False
         self.sort: str | None = None
+        self.report_workers = 1
 
         # Defaults for [html]
         self.extra_css: str | None = None
@@ -445,6 +446,7 @@ class CoverageConfig(TConfigurable, TPluginConfig):
         ("skip_covered", "report:skip_covered", "boolean"),
         ("skip_empty", "report:skip_empty", "boolean"),
         ("sort", "report:sort"),
+        ("report_workers", "report:workers", "int"),
         #
         # [html]
         ("extra_css", "html:extra_css"),

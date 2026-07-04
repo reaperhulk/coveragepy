@@ -1101,6 +1101,7 @@ class Coverage(TConfigurable):
         precision: int | None = None,
         sort: str | None = None,
         output_format: str | None = None,
+        workers: int | None = None,
     ) -> float:
         """Write a textual summary report to `file`.
 
@@ -1134,6 +1135,10 @@ class Coverage(TConfigurable):
         `precision` is the number of digits to display after the decimal
         point for percentages.
 
+        `workers` is the number of threads to use for analyzing files, which
+        only helps on free-threaded Pythons.  Zero means use the number of
+        CPUs.
+
         All of the arguments default to the settings read from the
         :ref:`configuration file <config>`.
 
@@ -1151,6 +1156,9 @@ class Coverage(TConfigurable):
         .. versionadded:: 7.0
             The `format` parameter.
 
+        .. versionadded:: 7.16
+            The `workers` parameter.
+
         """
         self._prepare_data_for_reporting()
         with override_config(
@@ -1165,6 +1173,7 @@ class Coverage(TConfigurable):
             precision=precision,
             sort=sort,
             format=output_format,
+            report_workers=workers,
         ):
             reporter = SummaryReporter(self)
             return reporter.report(morfs, outfile=file)
@@ -1213,6 +1222,7 @@ class Coverage(TConfigurable):
         contexts: list[str] | None = None,
         skip_empty: bool | None = None,
         precision: int | None = None,
+        workers: int | None = None,
     ) -> float:
         """Generate an HTML report.
 
@@ -1252,6 +1262,7 @@ class Coverage(TConfigurable):
             report_contexts=contexts,
             html_skip_empty=skip_empty,
             precision=precision,
+            report_workers=workers,
         ):
             reporter = HtmlReporter(self)
             return reporter.report(morfs)
@@ -1265,6 +1276,7 @@ class Coverage(TConfigurable):
         include: str | list[str] | None = None,
         contexts: list[str] | None = None,
         skip_empty: bool | None = None,
+        workers: int | None = None,
     ) -> float:
         """Generate an XML report of coverage results.
 
@@ -1287,6 +1299,7 @@ class Coverage(TConfigurable):
             xml_output=outfile,
             report_contexts=contexts,
             skip_empty=skip_empty,
+            report_workers=workers,
         ):
             return render_report(self.config.xml_output, XmlReporter(self), morfs, self._message)
 
@@ -1300,6 +1313,7 @@ class Coverage(TConfigurable):
         contexts: list[str] | None = None,
         pretty_print: bool | None = None,
         show_contexts: bool | None = None,
+        workers: int | None = None,
     ) -> float:
         """Generate a JSON report of coverage results.
 
@@ -1325,6 +1339,7 @@ class Coverage(TConfigurable):
             report_contexts=contexts,
             json_pretty_print=pretty_print,
             json_show_contexts=show_contexts,
+            report_workers=workers,
         ):
             return render_report(self.config.json_output, JsonReporter(self), morfs, self._message)
 
@@ -1336,6 +1351,7 @@ class Coverage(TConfigurable):
         omit: str | list[str] | None = None,
         include: str | list[str] | None = None,
         contexts: list[str] | None = None,
+        workers: int | None = None,
     ) -> float:
         """Generate an LCOV report of coverage results.
 
@@ -1354,6 +1370,7 @@ class Coverage(TConfigurable):
             report_include=include,
             lcov_output=outfile,
             report_contexts=contexts,
+            report_workers=workers,
         ):
             return render_report(self.config.lcov_output, LcovReporter(self), morfs, self._message)
 

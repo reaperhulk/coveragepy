@@ -48,5 +48,12 @@ code of 2, indicating that the total coverage was less than your target.  This
 can be used as part of a pass/fail condition, for example in a continuous
 integration server.  This option isn't available for **annotate**.
 
+The ``--workers`` option sets the number of threads to use for analyzing
+files, which can speed up reporting on projects with many files.  More than
+one thread only helps on free-threaded Pythons; on other Pythons the analysis
+is done serially regardless of the setting.  Zero means use as many threads as
+there are CPUs.  The default is 1.  This option isn't available for
+**annotate**.
+
 These options can also be set in your .coveragerc file. See
 :ref:`Configuration: [report] <config_report>`.

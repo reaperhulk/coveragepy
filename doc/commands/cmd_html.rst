@@ -70,13 +70,16 @@ Click the keyboard icon in the upper right to see the complete list.
       --no-skip-covered     Disable --skip-covered.
       --skip-empty          Skip files with no code.
       --title=TITLE         A text string to use as the title on the HTML.
+      --workers=N           Number of threads to use for analyzing files. Only has
+                            an effect on free-threaded Pythons. Zero means use the
+                            number of CPUs. Defaults to 1.
       --debug=OPTS          Debug options, separated by commas. [env:
                             COVERAGE_DEBUG]
       -h, --help            Get help on this command.
       --rcfile=RCFILE       Specify configuration file. By default '.coveragerc',
                             'setup.cfg', 'tox.ini', and 'pyproject.toml' are
                             tried. [env: COVERAGE_RCFILE]
-.. [[[end]]] (sum: PxT3s5PUUO)
+.. [[[end]]] (sum: /sMw3U9hBL)
 
 The title of the report can be set with the ``title`` setting in the
 ``[html]`` section of the configuration file, or the ``--title`` switch on

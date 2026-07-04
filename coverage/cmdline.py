@@ -374,6 +374,20 @@ class Opts:
         action="store_true",
         help="Display version information and exit.",
     )
+    workers = optparse.make_option(
+        "",
+        "--workers",
+        action="store",
+        metavar="N",
+        type=int,
+        help=prep_help(
+            """
+            Number of threads to use for analyzing files.  Only has an effect
+            on free-threaded Pythons.  Zero means use the number of CPUs.
+            Defaults to 1.
+            """
+        ),
+    )
 
 
 class CoverageOptionParser(optparse.OptionParser):
@@ -425,6 +439,7 @@ class CoverageOptionParser(optparse.OptionParser):
             timid=None,
             title=None,
             version=None,
+            workers=None,
         )
 
         self.disable_interspersed_args()
@@ -624,6 +639,7 @@ COMMANDS = {
             Opts.no_skip_covered,
             Opts.skip_empty,
             Opts.title,
+            Opts.workers,
         ]
         + GLOBAL_ARGS,
         usage="[options] [modules]",
@@ -649,6 +665,7 @@ COMMANDS = {
             Opts.json_pretty_print,
             Opts.quiet,
             Opts.show_contexts,
+            Opts.workers,
         ]
         + GLOBAL_ARGS,
         usage="[options] [modules]",
@@ -665,6 +682,7 @@ COMMANDS = {
             Opts.output_lcov,
             Opts.omit,
             Opts.quiet,
+            Opts.workers,
         ]
         + GLOBAL_ARGS,
         usage="[options] [modules]",
@@ -687,6 +705,7 @@ COMMANDS = {
             Opts.skip_covered,
             Opts.no_skip_covered,
             Opts.skip_empty,
+            Opts.workers,
         ]
         + GLOBAL_ARGS,
         usage="[options] [modules]",
@@ -725,6 +744,7 @@ COMMANDS = {
             Opts.output_xml,
             Opts.quiet,
             Opts.skip_empty,
+            Opts.workers,
         ]
         + GLOBAL_ARGS,
         usage="[options] [modules]",
@@ -898,6 +918,7 @@ class CoverageScript:
                 skip_empty=options.skip_empty,
                 sort=options.sort,
                 output_format=options.format,
+                workers=options.workers,
                 **report_args,
             )
         elif options.action == "annotate":
@@ -910,12 +931,14 @@ class CoverageScript:
                 skip_empty=options.skip_empty,
                 show_contexts=options.show_contexts,
                 title=options.title,
+                workers=options.workers,
                 **report_args,
             )
         elif options.action == "xml":
             total = self.coverage.xml_report(
                 outfile=options.outfile,
                 skip_empty=options.skip_empty,
+                workers=options.workers,
                 **report_args,
             )
         elif options.action == "json":
@@ -923,11 +946,13 @@ class CoverageScript:
                 outfile=options.outfile,
                 pretty_print=options.pretty_print,
                 show_contexts=options.show_contexts,
+                workers=options.workers,
                 **report_args,
             )
         elif options.action == "lcov":
             total = self.coverage.lcov_report(
                 outfile=options.outfile,
+                workers=options.workers,
                 **report_args,
             )
         else:

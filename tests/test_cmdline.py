@@ -61,6 +61,7 @@ class BaseCmdLineTest(CoverageTest):
         contexts=None,
         skip_empty=None,
         precision=None,
+        workers=None,
     )
     _defaults.Coverage().report(
         ignore_errors=None,
@@ -74,6 +75,7 @@ class BaseCmdLineTest(CoverageTest):
         precision=None,
         sort=None,
         output_format=None,
+        workers=None,
     )
     _defaults.Coverage().xml_report(
         ignore_errors=None,
@@ -83,6 +85,7 @@ class BaseCmdLineTest(CoverageTest):
         outfile=None,
         contexts=None,
         skip_empty=None,
+        workers=None,
     )
     _defaults.Coverage().json_report(
         ignore_errors=None,
@@ -93,6 +96,7 @@ class BaseCmdLineTest(CoverageTest):
         contexts=None,
         pretty_print=None,
         show_contexts=None,
+        workers=None,
     )
     _defaults.Coverage().lcov_report(
         ignore_errors=None,
@@ -101,6 +105,7 @@ class BaseCmdLineTest(CoverageTest):
         morfs=[],
         outfile=None,
         contexts=None,
+        workers=None,
     )
     _defaults.Coverage().combine(
         strict=False,

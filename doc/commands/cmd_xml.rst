@@ -47,13 +47,16 @@ compatible with `Cobertura`_.
                             'coverage.xml'
       -q, --quiet           Don't print messages about what is happening.
       --skip-empty          Skip files with no code.
+      --workers=N           Number of threads to use for analyzing files. Only has
+                            an effect on free-threaded Pythons. Zero means use the
+                            number of CPUs. Defaults to 1.
       --debug=OPTS          Debug options, separated by commas. [env:
                             COVERAGE_DEBUG]
       -h, --help            Get help on this command.
       --rcfile=RCFILE       Specify configuration file. By default '.coveragerc',
                             'setup.cfg', 'tox.ini', and 'pyproject.toml' are
                             tried. [env: COVERAGE_RCFILE]
-.. [[[end]]] (sum: 6i8iwXIv4S)
+.. [[[end]]] (sum: pkhdUIj92E)
 
 You can specify the name of the output file with the ``-o`` switch.
 

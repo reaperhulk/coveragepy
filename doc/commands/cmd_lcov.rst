@@ -43,13 +43,16 @@ The **lcov** command writes coverage data to a "coverage.lcov" file.
       --omit=PAT1,PAT2,...  Omit files whose paths match one of these patterns.
                             Accepts shell-style wildcards, which must be quoted.
       -q, --quiet           Don't print messages about what is happening.
+      --workers=N           Number of threads to use for analyzing files. Only has
+                            an effect on free-threaded Pythons. Zero means use the
+                            number of CPUs. Defaults to 1.
       --debug=OPTS          Debug options, separated by commas. [env:
                             COVERAGE_DEBUG]
       -h, --help            Get help on this command.
       --rcfile=RCFILE       Specify configuration file. By default '.coveragerc',
                             'setup.cfg', 'tox.ini', and 'pyproject.toml' are
                             tried. [env: COVERAGE_RCFILE]
-.. [[[end]]] (sum: 4Y093mzLUk)
+.. [[[end]]] (sum: ybaZ8zt7dZ)
 
 Common reporting options are described above in :ref:`cmd_reporting`.
 Also see :ref:`Configuration: [lcov] <config_lcov>`.

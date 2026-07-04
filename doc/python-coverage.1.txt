@@ -235,6 +235,11 @@ COMMAND REFERENCE
     \--title `TITLE`
         Use the text string `TITLE` as the title on the HTML.
 
+    \--workers `N`
+        Number of threads to use for analyzing files. Only has an effect
+        on free-threaded Pythons. Zero means use the number of CPUs.
+        Defaults to 1.
+
 
 **json** [ `option` ... ] [ `MODULE` ... ]
 
@@ -277,6 +282,11 @@ COMMAND REFERENCE
     \--show-contexts
         Include information about the contexts that executed each line.
 
+    \--workers `N`
+        Number of threads to use for analyzing files. Only has an effect
+        on free-threaded Pythons. Zero means use the number of CPUs.
+        Defaults to 1.
+
 
 **lcov** [ `option` ... ] [ `MODULE` ... ]
 
@@ -311,6 +321,11 @@ COMMAND REFERENCE
 
     \-q, --quiet
         Don't print messages about what is happening.
+
+    \--workers `N`
+        Number of threads to use for analyzing files. Only has an effect
+        on free-threaded Pythons. Zero means use the number of CPUs.
+        Defaults to 1.
 
 
 **report** [ `option` ... ] [ `MODULE` ... ]
@@ -367,6 +382,11 @@ COMMAND REFERENCE
     \--sort `COLUMN`
         Sort the report by the named column: ``name``, ``stmts``, ``miss``,
         ``branch``, ``brpart``, or ``cover``.
+
+    \--workers `N`
+        Number of threads to use for analyzing files. Only has an effect
+        on free-threaded Pythons. Zero means use the number of CPUs.
+        Defaults to 1.
 
 
 **run** [ `options` ... ] `PROGRAMFILE` [ `program_options` ]
@@ -461,6 +481,11 @@ COMMAND REFERENCE
 
     \--skip-empty
         Skip files with no code.
+
+    \--workers `N`
+        Number of threads to use for analyzing files. Only has an effect
+        on free-threaded Pythons. Zero means use the number of CPUs.
+        Defaults to 1.
 
 
 ENVIRONMENT VARIABLES

@@ -23,7 +23,19 @@ upgrading your version of coverage.py.
 Unreleased
 ----------
 
-Nothing yet.
+- Reporting commands (``report``, ``html``, ``json``, ``lcov``, and ``xml``)
+  have a new option, ``--workers``, the number of threads to use for analyzing
+  files, also settable as ``[report] workers``.  More than one thread only
+  helps on free-threaded Pythons, where it can speed up reporting on projects
+  with many files about two-fold, with identical output.  On other Pythons the
+  analysis is done serially regardless of the setting.  Zero means use as many
+  threads as there are CPUs.  The default is 1.
+
+- Performance: analyzing files for reporting is faster now, especially when
+  reporting on many files, by avoiding repeated typing constructions in hot
+  AST dispatch methods and by moving parser caches from shared class-level
+  ``lru_cache`` to per-instance caches.  The per-instance caches also avoid
+  cross-thread contention when reporting with multiple threads.
 
 
 .. start-releases

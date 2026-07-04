@@ -49,13 +49,16 @@ The **json** command writes coverage data to a "coverage.json" file.
       --pretty-print        Format the JSON for human readers.
       -q, --quiet           Don't print messages about what is happening.
       --show-contexts       Show contexts for covered lines.
+      --workers=N           Number of threads to use for analyzing files. Only has
+                            an effect on free-threaded Pythons. Zero means use the
+                            number of CPUs. Defaults to 1.
       --debug=OPTS          Debug options, separated by commas. [env:
                             COVERAGE_DEBUG]
       -h, --help            Get help on this command.
       --rcfile=RCFILE       Specify configuration file. By default '.coveragerc',
                             'setup.cfg', 'tox.ini', and 'pyproject.toml' are
                             tried. [env: COVERAGE_RCFILE]
-.. [[[end]]] (sum: HN4LEzUmN3)
+.. [[[end]]] (sum: 72HfK1W7oB)
 
 You can specify the name of the output file with the ``-o`` switch.  The JSON
 can be nicely formatted by specifying the ``--pretty-print`` switch.

@@ -69,6 +69,13 @@ Couldn't parse Python file XXX (couldnt-parse)
   During reporting, a file was thought to be Python, but it couldn't be parsed
   as Python.
 
+.. _warning_workers_need_free_threading:
+
+Multi-threaded reporting needs a free-threaded Python, reporting serially. (workers-need-free-threading)
+  The ``[report] workers`` setting asked for more than one thread, but this
+  Python has a global interpreter lock, so the analysis threads couldn't run
+  concurrently.  The report is created serially instead.
+
 .. _warning_trace_changed:
 
 Trace function changed, data is likely wrong: XXX (trace-changed)

@@ -892,6 +892,19 @@ values are "Name", "Stmts", "Miss", "Branch", "BrPart", or "Cover".  Prefix
 with ``-`` for descending sort (for example, "-cover").
 
 
+.. _config_report_workers:
+
+[report] workers
+................
+
+(integer, default 1) The number of threads to use for analyzing files when
+reporting.  More than one thread only helps on free-threaded Pythons; on
+other Pythons the analysis is done serially regardless of the setting.  Zero
+means use as many threads as there are CPUs.
+
+.. versionadded:: 7.16
+
+
 .. _config_html:
 
 [html]

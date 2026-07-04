@@ -5,16 +5,20 @@
 
 from __future__ import annotations
 
+import os
 import sys
-from collections.abc import Callable, Iterable
+import threading
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from typing import IO, TYPE_CHECKING, Protocol
 
-from coverage.exceptions import NoDataError, NotPython
+from coverage.data import CoverageData
+from coverage.exceptions import ConfigError, NoDataError, NotPython
 from coverage.files import GlobMatcher, prep_patterns
 from coverage.misc import ensure_dir_for_file, file_be_gone
 from coverage.plugin import FileReporter
-from coverage.results import Analysis
-from coverage.types import TMorfs
+from coverage.results import Analysis, analysis_from_file_reporter
+from coverage.types import TMorf, TMorfs
 
 if TYPE_CHECKING:
     from coverage import Coverage
@@ -93,10 +97,15 @@ def get_analysis_to_report(
     if not fr_morfs:
         raise NoDataError("No data to report.")
 
-    for fr, morf in sorted(fr_morfs):
-        try:
-            analysis = coverage._analyze(morf)
-        except NotPython:
+    fr_morfs = sorted(fr_morfs)
+    workers = _num_analysis_workers(coverage, len(fr_morfs))
+    if workers > 1:
+        results = _analyses_in_threads(coverage, [fr for fr, _ in fr_morfs], workers)
+    else:
+        results = _analyses_serial(coverage, [morf for _, morf in fr_morfs])
+
+    for (fr, morf), result in zip(fr_morfs, results):
+        if isinstance(result, NotPython):
             # Only report errors for .py files, and only if we didn't
             # explicitly suppress those errors.
             # NotPython is only raised by PythonFileReporter, which has a
@@ -106,12 +115,108 @@ def get_analysis_to_report(
                     msg = f"Couldn't parse Python file '{fr.filename}'"
                     coverage._warn(msg, slug="couldnt-parse")
                 else:
-                    raise
-        except Exception as exc:
+                    raise result
+        elif isinstance(result, Exception):
             if config.ignore_errors:
-                msg = f"Couldn't parse '{fr.filename}': {exc}".rstrip()
+                msg = f"Couldn't parse '{fr.filename}': {result}".rstrip()
                 coverage._warn(msg, slug="couldnt-parse")
             else:
-                raise
+                raise result
         else:
-            yield (fr, analysis)
+            yield (fr, result)
+
+
+def _analyses_serial(
+    coverage: Coverage,
+    morfs: Iterable[TMorf],
+) -> Iterator[Analysis | Exception]:
+    """Analyze morfs one at a time, yielding an Analysis or Exception for each."""
+    for morf in morfs:
+        try:
+            yield coverage._analyze(morf)
+        except Exception as exc:
+            yield exc
+
+
+def _analyses_in_threads(
+    coverage: Coverage,
+    file_reporters: list[FileReporter],
+    workers: int,
+) -> Iterator[Analysis | Exception]:
+    """Analyze file reporters in worker threads.
+
+    Yields an Analysis or Exception for each file reporter, in order.
+
+    Each worker thread gets its own view of the coverage data.  The data
+    could be in-memory (`_prepare_data_for_reporting` makes a no_disk
+    CoverageData when `[paths]` is configured), and in-memory data is empty
+    when read from a new thread, since CoverageData keeps a SQLite database
+    per thread.  Serializing the data once here and deserializing it in each
+    thread gives every worker the same snapshot.
+
+    """
+    config = coverage.config
+    serialized_data = coverage.get_data().dumps()
+    threadlocal = threading.local()
+
+    def thread_data() -> CoverageData:
+        """Get this thread's own copy of the coverage data."""
+        data: CoverageData | None = getattr(threadlocal, "data", None)
+        if data is None:
+            data = CoverageData(no_disk=True, warn=coverage._warn, debug=coverage._debug)
+            data.loads(serialized_data)
+            data.set_query_contexts(config.report_contexts)
+            threadlocal.data = data
+        return data
+
+    def analyze_one(fr: FileReporter) -> Analysis | Exception:
+        """Analyze one file reporter, returning exceptions as values."""
+        try:
+            filename = coverage._file_mapper(fr.filename)
+            return analysis_from_file_reporter(thread_data(), config.precision, fr, filename)
+        except Exception as exc:
+            return exc
+
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="coverage_analysis")
+    try:
+        yield from pool.map(analyze_one, file_reporters)
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
+
+
+# With fewer files than this, analysis isn't parallelized unless a number of
+# workers was explicitly configured.
+WORKERS_FILE_CUTOFF = 20
+
+
+def _num_analysis_workers(coverage: Coverage, num_files: int) -> int:
+    """Decide how many worker threads to use for analyzing `num_files` files."""
+    workers = coverage.config.report_workers
+    if workers < 0:
+        raise ConfigError(f"workers must be non-negative, not {workers}")
+    if workers == 1:
+        return 1
+    if not _threads_worthwhile():
+        coverage._warn(
+            "Multi-threaded reporting needs a free-threaded Python, reporting serially.",
+            slug="workers-need-free-threading",
+            once=True,
+        )
+        return 1
+    if workers == 0:
+        # Automatic: use all the CPUs, but don't parallelize a small job.
+        if num_files < WORKERS_FILE_CUTOFF:
+            return 1
+        workers = os.cpu_count() or 1
+    return max(1, min(workers, os.cpu_count() or 1, num_files))
+
+
+def _threads_worthwhile() -> bool:
+    """Would threads run concurrently enough to speed up analysis?
+
+    Analysis is pure Python, so threads only help when the GIL is disabled.
+    This checks the runtime GIL state, not the build, since the GIL can be
+    re-enabled at runtime on a free-threaded build.
+
+    """
+    return not getattr(sys, "_is_gil_enabled", lambda: True)()

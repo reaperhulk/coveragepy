@@ -68,13 +68,16 @@ as a percentage.
       --skip-covered        Skip files with 100% coverage.
       --no-skip-covered     Disable --skip-covered.
       --skip-empty          Skip files with no code.
+      --workers=N           Number of threads to use for analyzing files. Only has
+                            an effect on free-threaded Pythons. Zero means use the
+                            number of CPUs. Defaults to 1.
       --debug=OPTS          Debug options, separated by commas. [env:
                             COVERAGE_DEBUG]
       -h, --help            Get help on this command.
       --rcfile=RCFILE       Specify configuration file. By default '.coveragerc',
                             'setup.cfg', 'tox.ini', and 'pyproject.toml' are
                             tried. [env: COVERAGE_RCFILE]
-.. [[[end]]] (sum: sb/XFbnNDy)
+.. [[[end]]] (sum: fx+c6h429G)
 
 The ``-m`` flag also shows the line numbers of missing statements::
 
