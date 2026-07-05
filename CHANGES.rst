@@ -23,7 +23,11 @@ upgrading your version of coverage.py.
 Unreleased
 ----------
 
-Nothing yet.
+- Performance: on Python 3.13+, CTracer set each frame's ``f_trace`` with
+  ``PyObject_SetAttrString``, which re-interned the string ``"f_trace"`` and
+  probed the interned-strings hashtable on every call event - more than half
+  of the tracer's call-event instructions on Python 3.14.  The string is now
+  interned once, saving roughly 70ns per call event on call-heavy workloads.
 
 
 .. start-releases

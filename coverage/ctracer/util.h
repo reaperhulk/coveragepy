@@ -40,7 +40,13 @@
 #endif
 
 #if PY_VERSION_HEX >= 0x030D0000
-#define MyFrame_SetTrace(f, obj)    (PyObject_SetAttrString((PyObject*)(f), "f_trace", (PyObject*)(obj)))
+// 3.13 hid the frame's f_trace field, so it must be set through the
+// attribute API.  str_f_trace is interned once in CTracer_intern_strings:
+// PyObject_SetAttrString would re-intern "f_trace" and probe the interned-
+// strings hashtable on every call event, which profiling shows is a large
+// fraction of the call-event cost.
+extern PyObject * str_f_trace;
+#define MyFrame_SetTrace(f, obj)    (PyObject_SetAttr((PyObject*)(f), str_f_trace, (PyObject*)(obj)))
 #else
 #define MyFrame_SetTrace(f, obj)    {Py_INCREF(obj); Py_XSETREF((f)->f_trace, (PyObject*)(obj));}
 #endif
