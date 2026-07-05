@@ -164,6 +164,45 @@ What's left is mostly the floor: the interpreter's trace dispatch is
 ~23-31ns/event, now 70-80% of total overhead.  Getting below that means a
 `sys.monitoring` core, not a faster `sys.settrace` tracer.
 
+## Python 3.14 and free-threaded 3.14t validation
+
+The buffers were re-validated on CPython 3.14.6, both the regular build and
+the free-threading build (which is the first configuration where the
+per-tracer `PyMutex` path actually compiles and runs — `nm` confirms
+`PyMutex_Lock/Unlock` are referenced only in the `cp314t` build):
+
+- All variants compile warning-free on 3.14 and 3.14t.
+- Harness selftest passes on 3.11, 3.14, and 3.14t (repeatedly on 3.14t,
+  where the two-thread merge test is a genuine parallel race).
+- A dedicated stress — 8 threads recording in parallel while 2 more threads
+  drain every tracer in a loop, with the GIL confirmed disabled — merges
+  losslessly in both lines and arcs mode.
+- End-to-end `coverage run`/`coverage json` output on 3.14 and 3.14t is
+  identical to the pre-buffer tracer and (measurements-wise) to PyTracer,
+  in lines and branch mode, with threads and dynamic contexts.
+
+Two benchmarking lessons from this pass:
+
+- **Don't compare absolute ns across benchmark runs on this kind of shared
+  VM.**  The machine's speed shifted ~1.6x between sessions, which at first
+  looked like a 3.14 recording regression; interleaved A/B runs showed 3.11
+  and 3.14 pay the same recording cost, and per callgrind the buffer insert
+  is ~12 instructions per event on both.  Compare variants only within one
+  run, or interleave interpreters.
+- Within one machine state, total tracing overhead is *lower* on 3.14 than
+  on 3.11 (~3.2x vs ~4.8x on `lines_hi`): the 3.12+ instrumentation-based
+  `sys.settrace` dispatches line events more cheaply.  The free-threaded
+  build's dispatch is about twice the GIL build's (~30ns vs ~13ns per line
+  event), and each record pays an uncontended `PyMutex` lock on top.
+
+Profiling the call path on 3.14 also found a pre-existing hot spot: since
+3.13, `MyFrame_SetTrace` used `PyObject_SetAttrString(frame, "f_trace", ...)`,
+which re-interns the string `"f_trace"` and probes the interned-strings
+hashtable on **every call event** — over half of all in-tracer instructions
+on the `calls` workload.  Interning the string once and using
+`PyObject_SetAttr` cut the workload from 140.7ms to 112.1ms (~72ns per call
+event) with byte-identical output.
+
 ### Sample output (pre-optimization, for the record)
 
 ```

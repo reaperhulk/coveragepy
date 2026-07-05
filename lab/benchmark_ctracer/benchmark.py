@@ -93,7 +93,10 @@ PROFILE_N = 20_000
 # ---------------------------------------------------------------------------
 
 def build_tag() -> str:
-    return f"cp{sys.version_info.major}{sys.version_info.minor}"
+    tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+    if sysconfig.get_config_var("Py_GIL_DISABLED"):
+        tag += "t"
+    return tag
 
 
 def variant_so(variant: str) -> Path:

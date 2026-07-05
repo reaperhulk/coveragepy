@@ -31,6 +31,12 @@ Unreleased
   Recording is coordinated with draining by a per-tracer mutex on
   free-threaded builds, and by the GIL elsewhere.
 
+- Performance: on Python 3.13+, CTracer set each frame's ``f_trace`` with
+  ``PyObject_SetAttrString``, which re-interned the string ``"f_trace"`` on
+  every call event - more than half of the tracer's call-event instructions
+  on Python 3.14.  The string is now interned once, saving roughly 70ns per
+  call event.
+
 
 .. start-releases
 
