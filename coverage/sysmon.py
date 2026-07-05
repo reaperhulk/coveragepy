@@ -359,7 +359,10 @@ class SysMonitor(Tracer):
                 finally:
                     self.unlock_data()
                 file_data = self.data[tracename]
-                b2l = bytes_to_lines(code)
+                # PATCH(bench): byte_to_line is only read by the arc
+                # callbacks (sysmon_py_return / sysmon_branch_either), so
+                # don't pay for building it in line mode.
+                b2l = bytes_to_lines(code) if self.trace_arcs else None
             else:
                 file_data = None
                 b2l = None
@@ -381,10 +384,24 @@ class SysMonitor(Tracer):
                 with self.lock:
                     if self.sysmon_on:
                         assert sys_monitoring is not None
-                        local_events = events.PY_RETURN | events.PY_RESUME | events.LINE
+                        # PATCH(bench): only enable events we register
+                        # callbacks for.  Line mode never registers
+                        # PY_RETURN/PY_RESUME callbacks, and arcs mode
+                        # never registers PY_RESUME, so enabling them
+                        # just makes every return/resume of traced code
+                        # dispatch into the interpreter's instrumentation
+                        # machinery to find a NULL callback -- forever,
+                        # since nothing ever returns DISABLE for them.
                         if self.trace_arcs:
                             assert env.PYBEHAVIOR.branch_right_left
-                            local_events |= events.BRANCH_RIGHT | events.BRANCH_LEFT
+                            local_events = (
+                                events.PY_RETURN
+                                | events.LINE
+                                | events.BRANCH_RIGHT
+                                | events.BRANCH_LEFT
+                            )
+                        else:
+                            local_events = events.LINE
                         sys_monitoring.set_local_events(self.myid, code, local_events)
 
                         if LOG:  # pragma: debugging
