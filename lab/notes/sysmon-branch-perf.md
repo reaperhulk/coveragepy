@@ -172,6 +172,14 @@ They compose in either order with at most trivial context conflicts.
   worthwhile (#2218 especially, for line mode and generators).
 - The lazy resolver replaces `branch_trails()`/`always_jumps()` and the
   `InstructionWalker` precompute path entirely; those become dead code.
+- The multiline map is computed in exactly one place
+  (`multiline_map_from_tokens`): `_raw_parse` tokenizes once into a list
+  and takes the map from it, keeping only exclusion/indent bookkeeping in
+  its own loop.  The sysmon measurement path is the same tight loop; the
+  parse/report phase pays one extra pure-Python pass over the token list
+  (parse_source over the cryptography suite's 192 files: 1.75s -> 1.95s),
+  amortized by the reporting-phase caches.  Parser results verified
+  identical on 445 files including a realistic exclusion regex.
 - Open PR #2175 (fall back to ctrace for branch mode on 3.14) becomes
   unnecessary if this lands.
 - Open PR #2207 (single-line class bodies) touches the same event
