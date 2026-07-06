@@ -150,6 +150,22 @@ startup and coverage import; neither is per-event measurement cost.)
   output over the whole suite (26,376 statements, 2,484 branches) is
   byte-identical between old and new.
 
+## PR packaging
+
+The work is repackaged as two independent branches off main (7.15.1),
+each verified standalone (identical test-suite failure set to released
+main; coverage data byte-identical for the multiline branch, and
+report-identical modulo the five spurious intra-statement arcs for the
+resolver branch):
+
+| branch (vs released +35.2%)            | crypto suite | breadth |
+| --------------------------------------- | ------------ | ------- |
+| `claude/sysmon-multiline-map` alone      | +30.0%       | 4.15s   |
+| `claude/sysmon-lazy-branch-resolver` alone | +8.2%      | 1.82s   |
+| both combined (this branch)              | ≈0-2%        | 0.82s   |
+
+They compose in either order with at most trivial context conflicts.
+
 ## Upstreamability
 
 - The five PRs in the stack are independent of this change and remain
