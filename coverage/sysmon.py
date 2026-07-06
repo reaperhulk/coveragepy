@@ -453,8 +453,10 @@ class SysMonitor(Tracer):
         if resolver is None:
             if self.stats is not None:
                 self.stats["branch_trails"] += 1
+            assert code_info.byte_to_line is not None
             resolver = code_info.branch_resolver = BranchArcResolver(
                 code,
+                code_info.byte_to_line,
                 self.get_multiline_map(code.co_filename),
             )
         arc = resolver.resolve(instruction_offset, destination_offset)

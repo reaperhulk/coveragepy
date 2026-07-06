@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import collections
 import dis
+import opcode as opcode_module
 from collections.abc import Iterable, Mapping
 from types import CodeType
 from typing import Optional
@@ -160,6 +161,36 @@ TBranchTrailsOneSource = dict[Optional[TArc], set[TOffset]]
 TBranchTrails = dict[TOffset, TBranchTrailsOneSource]
 
 
+# CACHE doesn't exist in Python 3.10, but the branch resolver is only used
+# on 3.14+, so a placeholder value is fine.
+_CACHE = dis.opmap.get("CACHE", -1)
+_EXTENDED_ARG = dis.opmap["EXTENDED_ARG"]
+
+# All opcodes with a jump target.
+JUMPS = set(dis.hasjrel) | set(dis.hasjabs)
+
+# Opcodes that jump backwards.
+BACKWARD_JUMPS = {op for op in JUMPS if "JUMP_BACKWARD" in dis.opname[op]}
+
+def _cache_counts() -> list[int]:
+    """Number of inline CACHE entries following each opcode."""
+    counts = [0] * 256
+    entries = getattr(opcode_module, "_inline_cache_entries", {})
+    if isinstance(entries, dict):
+        for name, num in entries.items():
+            op = dis.opmap.get(name)
+            if op is not None:
+                counts[op] = num
+    else:
+        for op, num in enumerate(entries):
+            if op < 256:
+                counts[op] = num
+    return counts
+
+
+_CACHES_PER_OP = _cache_counts()
+
+
 class BranchArcResolver:
     """Resolve branch events to line arcs, one (source, dest) pair at a time.
 
@@ -167,7 +198,8 @@ class BranchArcResolver:
     (source offset, destination offset) pair is resolved at most a couple of
     times per code object.  Resolving pairs on demand is much cheaper than
     precomputing trails for every branch in the code object, most of which
-    never fire.
+    never fire.  We walk the raw bytecode bytes so that we never need to
+    disassemble whole code objects with `dis`.
 
     The resolution of one pair follows the same rules as `branch_trails`:
     starting from the destination, follow the trail of instructions (through
@@ -178,37 +210,68 @@ class BranchArcResolver:
 
     """
 
-    def __init__(self, code: CodeType, multiline_map: Mapping[TLineNo, TLineNo]) -> None:
+    def __init__(
+        self,
+        code: CodeType,
+        byte_to_line: Mapping[TOffset, TLineNo],
+        multiline_map: Mapping[TLineNo, TLineNo],
+    ) -> None:
         self.code = code
+        # co_code re-copies the bytes on each access, so fetch it once.
+        self.co_code = code.co_code
+        self.byte_to_line = byte_to_line
         self.multiline_map = multiline_map
-        self.iwalker = InstructionWalker(code)
 
-    def source_line(self, offset: TOffset) -> TLineNo | None:
+    def line_at(self, offset: TOffset) -> TLineNo | None:
         """The source line of the instruction at `offset`, de-multilined."""
-        inst = self.iwalker.insts.get(offset)
-        if inst is None:
-            return None
-        line = inst.line_number
+        line = self.byte_to_line.get(offset)
         if line is not None:
             line = self.multiline_map.get(line, line)
         return line
 
     def resolve(self, source: TOffset, dest: TOffset) -> TArc | None:
         """Turn a branch event's (source, dest) offsets into an arc, or None."""
-        from_line = self.source_line(source)
+        from_line = self.line_at(source)
         if from_line is None:
             return None
-        for inst in self.iwalker.walk(start_at=dest, follow_jumps=True):
-            line = inst.line_number
+        co_code = self.co_code
+        max_offset = len(co_code)
+        byte_to_line = self.byte_to_line
+        multiline_map = self.multiline_map
+        offset = dest
+        ext_arg = 0
+        seen: set[TOffset] = set()
+        while 0 <= offset < max_offset and offset not in seen:
+            seen.add(offset)
+            op = co_code[offset]
+            if op == _CACHE:
+                offset += 2
+                continue
+            if op == _EXTENDED_ARG:
+                ext_arg = (ext_arg | co_code[offset + 1]) << 8
+                offset += 2
+                continue
+            line = byte_to_line.get(offset)
             if line is not None:
-                line = self.multiline_map.get(line, line)
-            if line and line != from_line:
-                return (from_line, line)
-            if inst.opcode in RETURNS:
-                return (from_line, -self.code.co_firstlineno)
-            if inst.jump_target and (inst.opcode not in ALWAYS_JUMPS):
+                line = multiline_map.get(line, line)
+                if line and line != from_line:
+                    return (from_line, line)
+            if op in JUMPS:
+                if op in ALWAYS_JUMPS:
+                    arg = ext_arg | co_code[offset + 1]
+                    next_offset = offset + 2 + 2 * _CACHES_PER_OP[op]
+                    if op in BACKWARD_JUMPS:
+                        offset = next_offset - 2 * arg
+                    else:
+                        offset = next_offset + 2 * arg
+                    ext_arg = 0
+                    continue
                 # Another branch possibility: it will get its own events.
                 return None
+            if op in RETURNS:
+                return (from_line, -self.code.co_firstlineno)
+            ext_arg = 0
+            offset += 2
         return None
 
 
