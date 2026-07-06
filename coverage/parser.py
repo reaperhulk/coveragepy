@@ -26,6 +26,38 @@ from coverage.types import TArc, TLineNo
 os = isolate_module(os)
 
 
+def multiline_map_from_text(text: str) -> dict[TLineNo, TLineNo]:
+    """Compute just the multiline map for `text`, without a full parse.
+
+    The result maps line numbers in multi-line statements to the first line
+    number of their statement.  This must produce the same map as the
+    multiline_map handling in `PythonParser._raw_parse`, which computes it as
+    part of a full parse.  The sys.monitoring core uses this to get the map
+    without paying for the full parse during measurement.
+
+    Can raise tokenize.TokenError, IndentationError, or SyntaxError if the
+    text isn't parsable as Python.
+
+    """
+    multiline_map: dict[TLineNo, TLineNo] = {}
+    # The line number of the first line in a multi-line statement.
+    first_line = 0
+    for toktype, ttext, (slineno, _), (elineno, _), _ in generate_tokens(text):
+        if toktype == token.NEWLINE:
+            if first_line and elineno != first_line:
+                # We're at the end of a line, and we've ended on a
+                # different line than the first line of the statement,
+                # so record a multi-line range.
+                for l in range(first_line, elineno + 1):
+                    multiline_map[l] = first_line
+            first_line = 0
+        if ttext.strip() and toktype != tokenize.COMMENT:
+            # A non-white-space token, the first in a statement.
+            if not first_line:
+                first_line = slineno
+    return multiline_map
+
+
 class PythonParser:
     """Parse code to find executable lines, excluded lines, etc.
 
@@ -127,6 +159,10 @@ class PythonParser:
         """Parse the source to find the interesting facts about its lines.
 
         A handful of attributes are updated.
+
+        Note: the multiline_map handling here must match
+        `multiline_map_from_text`, which computes only the multiline map, for
+        the sys.monitoring core.
 
         """
         # Find lines which match an exclusion pattern.

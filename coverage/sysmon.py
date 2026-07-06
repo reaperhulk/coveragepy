@@ -12,6 +12,7 @@ import os
 import os.path
 import sys
 import threading
+import tokenize
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -21,9 +22,10 @@ from typing import Any, NewType, Optional, cast
 from coverage import env
 from coverage.bytecode import BranchArcResolver, bytes_to_lines
 from coverage.debug import short_filename, short_stack
-from coverage.exceptions import NoSource, NotPython
+from coverage.exceptions import NoSource
 from coverage.misc import isolate_module
-from coverage.parser import PythonParser
+from coverage.parser import multiline_map_from_text
+from coverage.python import get_python_source
 from coverage.types import (
     AnyCallable,
     TFileDisposition,
@@ -485,17 +487,17 @@ class SysMonitor(Tracer):
 
 
 def compute_multiline_map(filename: str) -> dict[TLineNo, TLineNo]:
-    """Parse `filename` and return its multiline map."""
+    """Tokenize `filename` and return its multiline map."""
     try:
-        parser = PythonParser(filename=filename)
-        parser.parse_source()
-    except NotPython:
+        text = get_python_source(filename)
+    except (OSError, NoSource):
+        # This can happen if open() in python.py fails.
+        return {}
+    try:
+        return multiline_map_from_text(text)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
         # The file was not Python. This can happen when the code object refers
         # to an original non-Python source file, like a Jinja template.
         # In that case, just return an empty map, which might lead to slightly
         # wrong branch coverage, but we don't have any better option.
         return {}
-    except NoSource:
-        # This can happen if open() in python.py fails.
-        return {}
-    return parser.multiline_map

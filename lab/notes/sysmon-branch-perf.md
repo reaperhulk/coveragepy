@@ -89,12 +89,21 @@ The replacement (`BranchArcResolver` in `coverage/bytecode.py`):
 
 Results (cryptography suite, branch mode):
 
-| configuration                          | wall time | overhead |
-| -------------------------------------- | --------- | -------- |
-| PR stack                               | 46.46s    | +31.1%   |
-| + lazy resolver (dis-based, 1st cut)   | 42.23s    | +19.2%   |
-| + raw-bytecode resolver (final)        | TBD       | TBD      |
-| interpreter floor (all analysis stubbed)| 35.64s   | +0.6%    |
+| configuration                            | wall time | overhead |
+| ---------------------------------------- | --------- | -------- |
+| PR stack                                 | 46.46s    | +31.1%   |
+| PR stack + unbounded lru_cache only      | 46.34s    | +30.8%   |
+| lazy resolver, dis-based (1st cut)       | 42.23s    | +19.2%   |
+| lazy resolver, raw bytecode walk         | 37.34s    | **+5.4%** |
+| + tokenize-only multiline map (final)    | TBD       | TBD      |
+| interpreter floor (all analysis stubbed) | 35.64s    | +0.6%    |
+
+Of the final residual, ~1.5s was `get_multiline_map()`: even parsed once
+per file, `PythonParser.parse_source()` does an `ast.parse`, a full
+tokenization, a `compile()` (ByteParser), and AST walks.  The multiline
+map only needs the tokenize loop, so `multiline_map_from_text()` extracts
+exactly that (0.34s for the same 192 files, identical maps on 445 files
+checked, including all of coverage's own source and tests).
 
 breadth microbenchmark (2,250 functions, cold-dominated, best of 5):
 
@@ -103,8 +112,14 @@ breadth microbenchmark (2,250 functions, cold-dominated, best of 5):
 | no coverage         | 0.03s     |
 | 7.15.1              | 5.20s     |
 | PR stack            | 4.98s     |
+| PR stack + unbounded lru_cache | 4.91s |
 | lazy resolver (dis) | 3.49s     |
-| raw-bytes resolver  | TBD       |
+| raw-bytes resolver  | 1.57s     |
+| + tokenize-only multiline map | TBD |
+
+(Of the remaining ~1.5s on breadth, ~0.6s is writing the arc data to the
+data file at save time — hashing in sqldata — and ~0.2s is interpreter
+startup and coverage import; neither is per-event measurement cost.)
 
 ## Correctness
 
