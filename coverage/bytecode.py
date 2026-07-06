@@ -160,6 +160,58 @@ TBranchTrailsOneSource = dict[Optional[TArc], set[TOffset]]
 TBranchTrails = dict[TOffset, TBranchTrailsOneSource]
 
 
+class BranchArcResolver:
+    """Resolve branch events to line arcs, one (source, dest) pair at a time.
+
+    Branch events are one-shot (they are DISABLEd after firing), so each
+    (source offset, destination offset) pair is resolved at most a couple of
+    times per code object.  Resolving pairs on demand is much cheaper than
+    precomputing trails for every branch in the code object, most of which
+    never fire.
+
+    The resolution of one pair follows the same rules as `branch_trails`:
+    starting from the destination, follow the trail of instructions (through
+    unconditional jumps) until we reach an instruction on a new source line
+    (giving us the arc), a return (an arc to leaving the code object), or
+    another branch possibility (no arc: that branch will produce its own
+    events).
+
+    """
+
+    def __init__(self, code: CodeType, multiline_map: Mapping[TLineNo, TLineNo]) -> None:
+        self.code = code
+        self.multiline_map = multiline_map
+        self.iwalker = InstructionWalker(code)
+
+    def source_line(self, offset: TOffset) -> TLineNo | None:
+        """The source line of the instruction at `offset`, de-multilined."""
+        inst = self.iwalker.insts.get(offset)
+        if inst is None:
+            return None
+        line = inst.line_number
+        if line is not None:
+            line = self.multiline_map.get(line, line)
+        return line
+
+    def resolve(self, source: TOffset, dest: TOffset) -> TArc | None:
+        """Turn a branch event's (source, dest) offsets into an arc, or None."""
+        from_line = self.source_line(source)
+        if from_line is None:
+            return None
+        for inst in self.iwalker.walk(start_at=dest, follow_jumps=True):
+            line = inst.line_number
+            if line is not None:
+                line = self.multiline_map.get(line, line)
+            if line and line != from_line:
+                return (from_line, line)
+            if inst.opcode in RETURNS:
+                return (from_line, -self.code.co_firstlineno)
+            if inst.jump_target and (inst.opcode not in ALWAYS_JUMPS):
+                # Another branch possibility: it will get its own events.
+                return None
+        return None
+
+
 def branch_trails(
     code: CodeType,
     multiline_map: Mapping[TLineNo, TLineNo],
