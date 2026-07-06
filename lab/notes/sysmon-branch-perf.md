@@ -95,7 +95,7 @@ Results (cryptography suite, branch mode):
 | PR stack + unbounded lru_cache only      | 46.34s    | +30.8%   |
 | lazy resolver, dis-based (1st cut)       | 42.23s    | +19.2%   |
 | lazy resolver, raw bytecode walk         | 37.34s    | **+5.4%** |
-| + tokenize-only multiline map (final)    | TBD       | TBD      |
+| + tokenize-only multiline map (final)    | 35.15s    | **≈0-2% (noise floor)** |
 | interpreter floor (all analysis stubbed) | 35.64s    | +0.6%    |
 
 Of the final residual, ~1.5s was `get_multiline_map()`: even parsed once
@@ -115,9 +115,9 @@ breadth microbenchmark (2,250 functions, cold-dominated, best of 5):
 | PR stack + unbounded lru_cache | 4.91s |
 | lazy resolver (dis) | 3.49s     |
 | raw-bytes resolver  | 1.57s     |
-| + tokenize-only multiline map | TBD |
+| + tokenize-only multiline map | 0.82s |
 
-(Of the remaining ~1.5s on breadth, ~0.6s is writing the arc data to the
+(Of the final ~0.8s on breadth, ~0.6s is writing the arc data to the
 data file at save time — hashing in sqldata — and ~0.2s is interpreter
 startup and coverage import; neither is per-event measurement cost.)
 
@@ -143,8 +143,12 @@ startup and coverage import; neither is per-event measurement cost.)
   they come from the old code's raw `byte_to_line` fallback, which does
   not apply the multiline map. The new resolver resolves these events to
   the statement's first line instead (matching what the parser predicts),
-  so the spurious intra-statement arcs disappear. TBD: determinism
-  cross-check.
+  so the spurious intra-statement arcs disappear. Two runs of the
+  unmodified stack produce byte-identical data (the difference is real
+  and stable, not run noise); all five arcs map to `(first, first)`
+  self-arcs under report-time `translate_arcs`, and `coverage report`
+  output over the whole suite (26,376 statements, 2,484 branches) is
+  byte-identical between old and new.
 
 ## Upstreamability
 
