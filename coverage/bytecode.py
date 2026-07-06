@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import dis
-import opcode as opcode_module
 from collections.abc import Iterable, Mapping
 from types import CodeType
 
@@ -119,24 +118,6 @@ JUMPS = set(dis.hasjrel) | set(dis.hasjabs)
 # Opcodes that jump backwards.
 BACKWARD_JUMPS = {op for op in JUMPS if "JUMP_BACKWARD" in dis.opname[op]}
 
-def _cache_counts() -> list[int]:
-    """Number of inline CACHE entries following each opcode."""
-    counts = [0] * 256
-    entries = getattr(opcode_module, "_inline_cache_entries", {})
-    if isinstance(entries, dict):
-        for name, num in entries.items():
-            op = dis.opmap.get(name)
-            if op is not None:
-                counts[op] = num
-    else:
-        for op, num in enumerate(entries):
-            if op < 256:
-                counts[op] = num
-    return counts
-
-
-_CACHES_PER_OP = _cache_counts()
-
 
 class BranchArcResolver:
     """Resolve branch events to line arcs, one (source, dest) pair at a time.
@@ -206,7 +187,12 @@ class BranchArcResolver:
             if op in JUMPS:
                 if op in ALWAYS_JUMPS:
                     arg = ext_arg | co_code[offset + 1]
-                    next_offset = offset + 2 + 2 * _CACHES_PER_OP[op]
+                    # Jump distances are measured from the end of the
+                    # instruction's inline CACHE entries, which appear in
+                    # co_code as CACHE opcodes immediately following it.
+                    next_offset = offset + 2
+                    while next_offset < max_offset and co_code[next_offset] == _CACHE:
+                        next_offset += 2
                     if op in BACKWARD_JUMPS:
                         offset = next_offset - 2 * arg
                     else:
