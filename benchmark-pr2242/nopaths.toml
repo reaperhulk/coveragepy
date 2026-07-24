@@ -1,0 +1,7 @@
+[run]
+branch = true
+relative_files = true
+source = ["cryptography", "tests/"]
+
+[report]
+exclude_lines = ["@abc.abstractmethod", "@typing.overload", "if typing.TYPE_CHECKING"]
